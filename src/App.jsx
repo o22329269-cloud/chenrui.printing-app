@@ -1,10 +1,25 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   LayoutDashboard, FileText, Layers, PackageSearch, PackageCheck, Route,
   ClipboardList, Lock, X, History, CheckCircle2, ArrowRight,
   Building2, Search, ChevronRight, Plus, Truck, Send, ChevronUp, ChevronDown,
-  Pencil, Trash2, Undo2, AlertTriangle, Settings, Users
+  Pencil, Trash2, Undo2, AlertTriangle, Settings, Users, LogIn, LogOut, Loader2, Mail
 } from "lucide-react";
+import { createClient } from "@supabase/supabase-js";
+
+/* ============================================================
+   雲端連線設定（登入、資料保存、跨裝置同步）
+   ============================================================
+   VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY 需在 Vercel「Environment
+   Variables」或本機 .env 檔設定。兩者若沒設定，系統會自動切回「示範模式」
+   （不登入、資料只存在這次瀏覽中，重新整理會消失）——方便在 Claude 對話框
+   裡直接預覽介面，不會因為缺少雲端設定而整個當掉。
+   ============================================================ */
+const SUPABASE_URL = typeof import.meta !== "undefined" ? import.meta.env?.VITE_SUPABASE_URL : undefined;
+const SUPABASE_ANON_KEY = typeof import.meta !== "undefined" ? import.meta.env?.VITE_SUPABASE_ANON_KEY : undefined;
+const CLOUD_ENABLED = !!(SUPABASE_URL && SUPABASE_ANON_KEY);
+const supabase = CLOUD_ENABLED ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
+const APP_STATE_ROW_ID = 1;
 
 /* ============================================================
    uid / date helpers（demo 用，正式環境請由後端產生）
@@ -418,9 +433,9 @@ function initialTasks() {
 
 function initialStaff() {
   return [
-    { id: "staff-1", name: "陳經理", role: ROLE.ADMIN, permissions: clonePermissions(DEFAULT_ROLE_PERMISSIONS[ROLE.ADMIN]) },
-    { id: "staff-2", name: "林設計", role: ROLE.DESIGN, permissions: clonePermissions(DEFAULT_ROLE_PERMISSIONS[ROLE.DESIGN]) },
-    { id: "staff-3", name: "陳外務", role: ROLE.DELIVERY, permissions: clonePermissions(DEFAULT_ROLE_PERMISSIONS[ROLE.DELIVERY]) },
+    { id: "staff-1", name: "陳經理", email: "", role: ROLE.ADMIN, permissions: clonePermissions(DEFAULT_ROLE_PERMISSIONS[ROLE.ADMIN]) },
+    { id: "staff-2", name: "林設計", email: "", role: ROLE.DESIGN, permissions: clonePermissions(DEFAULT_ROLE_PERMISSIONS[ROLE.DESIGN]) },
+    { id: "staff-3", name: "陳外務", email: "", role: ROLE.DELIVERY, permissions: clonePermissions(DEFAULT_ROLE_PERMISSIONS[ROLE.DELIVERY]) },
   ];
 }
 
@@ -1558,8 +1573,8 @@ function QuickRoutineOrderModal({ open, onClose, onSubmit }) {
    十二、權限管理 + Google 試算表匯出設定（點8、點9，僅主管可開啟）
    ============================================================ */
 
-function PermissionsAdminModal({ open, onClose, staffList, onAddStaff, onDeleteStaff, onTogglePermission, webhookUrl, onWebhookChange, exportLog }) {
-  const [newStaff, setNewStaff] = useState({ name: "", role: ROLE.DESIGN });
+function PermissionsAdminModal({ open, onClose, staffList, onAddStaff, onDeleteStaff, onTogglePermission, onUpdateEmail, webhookUrl, onWebhookChange, exportLog }) {
+  const [newStaff, setNewStaff] = useState({ name: "", email: "", role: ROLE.DESIGN });
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const [expandedIds, setExpandedIds] = useState(new Set());
   if (!open) return null;
@@ -1597,12 +1612,24 @@ function PermissionsAdminModal({ open, onClose, staffList, onAddStaff, onDeleteS
           <div className="p-5 space-y-6">
             <div>
               <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2 flex items-center gap-1"><Users size={12} /> 新增人員</h4>
-              <div className="flex gap-2">
+              {CLOUD_ENABLED && (
+                <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1.5 mb-2">
+                  這裡只建立「權限設定檔」。真正能登入的帳號密碼，請先到 Supabase 後台「Authentication → Users → Add user」建立，
+                  這裡的 Email 要跟那邊填的完全一致，系統才認得出是同一個人。
+                </p>
+              )}
+              <div className="flex gap-2 flex-wrap">
                 <input
                   placeholder="姓名"
                   value={newStaff.name}
                   onChange={(e) => setNewStaff((f) => ({ ...f, name: e.target.value }))}
-                  className="flex-1 border border-slate-200 rounded px-2 py-1.5 text-sm"
+                  className="flex-1 min-w-[100px] border border-slate-200 rounded px-2 py-1.5 text-sm"
+                />
+                <input
+                  placeholder="登入 Email（需與 Supabase 帳號一致）"
+                  value={newStaff.email}
+                  onChange={(e) => setNewStaff((f) => ({ ...f, email: e.target.value }))}
+                  className="flex-1 min-w-[160px] border border-slate-200 rounded px-2 py-1.5 text-sm"
                 />
                 <select
                   value={newStaff.role}
@@ -1614,8 +1641,8 @@ function PermissionsAdminModal({ open, onClose, staffList, onAddStaff, onDeleteS
                 <button
                   onClick={() => {
                     if (!newStaff.name.trim()) return;
-                    onAddStaff(newStaff.name, newStaff.role);
-                    setNewStaff({ name: "", role: ROLE.DESIGN });
+                    onAddStaff(newStaff.name, newStaff.role, newStaff.email);
+                    setNewStaff({ name: "", email: "", role: ROLE.DESIGN });
                   }}
                   className="bg-fuchsia-600 hover:bg-fuchsia-700 text-white text-sm rounded px-3 py-1.5 shrink-0"
                 >
@@ -1633,9 +1660,10 @@ function PermissionsAdminModal({ open, onClose, staffList, onAddStaff, onDeleteS
                       onClick={() => toggleExpand(s.id)}
                       className="w-full flex items-center justify-between p-3 hover:bg-slate-50 text-left"
                     >
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         {isOpen ? <ChevronUp size={14} className="text-slate-400" /> : <ChevronDown size={14} className="text-slate-400" />}
                         <span className="font-medium text-slate-800 text-sm">{s.name}</span>
+                        {s.email && <span className="text-[11px] text-slate-400 font-mono">{s.email}</span>}
                         <span className="text-[11px] text-slate-400">已開啟 {countOn(s.permissions)}/{maxCount} 項權限</span>
                       </div>
                       <span
@@ -1651,7 +1679,19 @@ function PermissionsAdminModal({ open, onClose, staffList, onAddStaff, onDeleteS
                       </span>
                     </button>
                     {isOpen && (
-                      <div className="p-3 border-t border-slate-100 overflow-x-auto">
+                      <div className="p-3 border-t border-slate-100">
+                        {CLOUD_ENABLED && (
+                          <div className="mb-3">
+                            <label className="text-xs text-slate-500 block mb-1">登入 Email（需與 Supabase 帳號一致）</label>
+                            <input
+                              value={s.email || ""}
+                              onChange={(e) => onUpdateEmail(s.id, e.target.value)}
+                              placeholder="you@example.com"
+                              className="w-full max-w-sm border border-slate-200 rounded px-2 py-1.5 text-sm font-mono"
+                            />
+                          </div>
+                        )}
+                        <div className="overflow-x-auto">
                         <table className="w-full text-xs">
                           <thead>
                             <tr className="text-slate-400">
@@ -1678,6 +1718,7 @@ function PermissionsAdminModal({ open, onClose, staffList, onAddStaff, onDeleteS
                             ))}
                           </tbody>
                         </table>
+                        </div>
                       </div>
                     )}
                   </div>
@@ -1721,6 +1762,90 @@ function PermissionsAdminModal({ open, onClose, staffList, onAddStaff, onDeleteS
 }
 
 /* ============================================================
+   十二之二、登入畫面
+   ============================================================ */
+
+function LoginScreen({ onLogin }) {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (!email.trim() || !password) return;
+    setError("");
+    setLoading(true);
+    const { error: signInError } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+    setLoading(false);
+    if (signInError) {
+      setError(signInError.message === "Invalid login credentials" ? "帳號或密碼不正確" : signInError.message);
+      return;
+    }
+    onLogin?.();
+  };
+
+  return (
+    <div className="min-h-screen bg-stone-50 flex items-center justify-center p-4 font-body">
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@600;700&family=Inter:wght@400;500;600&display=swap');
+        .font-display { font-family: 'Space Grotesk', sans-serif; }
+        .font-body { font-family: 'Inter', sans-serif; }
+      `}</style>
+      <div className="w-full max-w-sm bg-white rounded-xl shadow-xl border border-slate-100 p-6">
+        <div className="flex items-center gap-2 mb-1">
+          <div className="flex gap-0.5">
+            <span className="h-3 w-3 rounded-full bg-cyan-500" />
+            <span className="h-3 w-3 rounded-full bg-fuchsia-500" />
+            <span className="h-3 w-3 rounded-full bg-amber-400" />
+            <span className="h-3 w-3 rounded-full bg-slate-900" />
+          </div>
+        </div>
+        <h1 className="font-display font-bold text-xl text-slate-800">誠瑞印刷</h1>
+        <p className="text-xs text-slate-400 mb-5">訂單與任務管理系統・請先登入</p>
+
+        <form onSubmit={submit} className="space-y-3">
+          <div>
+            <label className="text-xs text-slate-500 block mb-1">帳號（Email）</label>
+            <div className="relative">
+              <Mail size={14} className="absolute left-2.5 top-2.5 text-slate-300" />
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="w-full border border-slate-200 rounded px-2 py-1.5 pl-8 text-sm"
+                placeholder="you@example.com"
+                autoComplete="username"
+              />
+            </div>
+          </div>
+          <div>
+            <label className="text-xs text-slate-500 block mb-1">密碼</label>
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="w-full border border-slate-200 rounded px-2 py-1.5 text-sm"
+              autoComplete="current-password"
+            />
+          </div>
+          {error && <div className="text-xs text-red-600 bg-red-50 border border-red-100 rounded px-2 py-1.5">{error}</div>}
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full flex items-center justify-center gap-1.5 bg-fuchsia-600 hover:bg-fuchsia-700 disabled:bg-slate-300 text-white text-sm font-medium rounded py-2 mt-1"
+          >
+            {loading ? <Loader2 size={14} className="animate-spin" /> : <LogIn size={14} />}
+            {loading ? "登入中…" : "登入"}
+          </button>
+        </form>
+        <p className="text-[11px] text-slate-300 mt-4 text-center">帳號由管理員建立，如尚未取得帳號密碼請聯繫主管。</p>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
    十三、主應用程式
    ============================================================ */
 
@@ -1738,9 +1863,126 @@ export default function App() {
   const [sheetWebhookUrl, setSheetWebhookUrl] = useState("");
   const [exportLog, setExportLog] = useState([]);
 
-  const activeStaff = staffList.find((s) => s.id === selectedStaffId) || staffList[0];
-  const role = activeStaff.role;
-  const currentPermissions = activeStaff.permissions;
+  // ---- 雲端登入／跨裝置同步狀態（僅在有設定 Supabase 連線時啟用） ----
+  const [session, setSession] = useState(null);
+  const [authChecked, setAuthChecked] = useState(!CLOUD_ENABLED);
+  const [cloudDataLoaded, setCloudDataLoaded] = useState(!CLOUD_ENABLED);
+  const isRemoteUpdate = useRef(false);
+
+  // 檢查登入狀態、監聽登入/登出事件
+  useEffect(() => {
+    if (!CLOUD_ENABLED) return;
+    supabase.auth.getSession().then(({ data }) => {
+      setSession(data.session);
+      setAuthChecked(true);
+    });
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, newSession) => {
+      setSession(newSession);
+    });
+    return () => listener.subscription.unsubscribe();
+  }, []);
+
+  // 登入後：讀取雲端資料 + 訂閱即時同步（其他裝置變更會自動反映）
+  useEffect(() => {
+    if (!CLOUD_ENABLED || !session) return;
+    let channel;
+    let cancelled = false;
+
+    const applyRemote = (d) => {
+      if (!d) return;
+      isRemoteUpdate.current = true;
+      if (d.orders) setOrders(d.orders);
+      if (d.deliveryTasks) setDeliveryTasks(d.deliveryTasks);
+      if (d.staffList) setStaffList(d.staffList);
+      if (d.exportLog) setExportLog(d.exportLog);
+      if (typeof d.sheetWebhookUrl === "string") setSheetWebhookUrl(d.sheetWebhookUrl);
+    };
+
+    (async () => {
+      const { data, error } = await supabase.from("app_state").select("data").eq("id", APP_STATE_ROW_ID).maybeSingle();
+      if (cancelled) return;
+      if (!error && data?.data) {
+        applyRemote(data.data);
+      } else {
+        // 第一次使用，把目前的示範資料寫進雲端當作初始狀態
+        await supabase.from("app_state").upsert({
+          id: APP_STATE_ROW_ID,
+          data: { orders, deliveryTasks, staffList, exportLog, sheetWebhookUrl },
+        });
+      }
+      setCloudDataLoaded(true);
+
+      channel = supabase
+        .channel("app_state_sync")
+        .on("postgres_changes", { event: "*", schema: "public", table: "app_state", filter: `id=eq.${APP_STATE_ROW_ID}` }, (payload) => {
+          applyRemote(payload.new?.data);
+        })
+        .subscribe();
+    })();
+
+    return () => {
+      cancelled = true;
+      if (channel) supabase.removeChannel(channel);
+    };
+  }, [session]);
+
+  // 任何資料變動時（非遠端同步造成的），debounce 後寫回雲端，讓其他裝置也能看到最新狀態，
+  // 也是「關閉重開後恢復上次狀態」的同一套機制——重新整理／關閉分頁後，登入時會重新從雲端讀回這筆資料。
+  const pendingWriteRef = useRef(null);
+  const writeTimeoutRef = useRef(null);
+
+  const flushPendingWrite = () => {
+    if (!CLOUD_ENABLED || !pendingWriteRef.current) return;
+    const payload = pendingWriteRef.current;
+    pendingWriteRef.current = null;
+    if (writeTimeoutRef.current) { clearTimeout(writeTimeoutRef.current); writeTimeoutRef.current = null; }
+    supabase.from("app_state").upsert({ id: APP_STATE_ROW_ID, data: payload });
+  };
+
+  useEffect(() => {
+    if (!CLOUD_ENABLED || !session || !cloudDataLoaded) return;
+    if (isRemoteUpdate.current) {
+      isRemoteUpdate.current = false;
+      return;
+    }
+    const snapshot = { orders, deliveryTasks, staffList, exportLog, sheetWebhookUrl };
+    pendingWriteRef.current = snapshot;
+    if (writeTimeoutRef.current) clearTimeout(writeTimeoutRef.current);
+    writeTimeoutRef.current = setTimeout(() => {
+      pendingWriteRef.current = null;
+      writeTimeoutRef.current = null;
+      supabase.from("app_state").upsert({ id: APP_STATE_ROW_ID, data: snapshot });
+    }, 600);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orders, deliveryTasks, staffList, exportLog, sheetWebhookUrl]);
+
+  // 點：即使還沒到 600ms、使用者就切分頁／關閉視窗，也立刻把最新內容寫進雲端，避免遺失最後一筆變動
+  useEffect(() => {
+    if (!CLOUD_ENABLED) return;
+    const onVisibilityChange = () => { if (document.visibilityState === "hidden") flushPendingWrite(); };
+    window.addEventListener("beforeunload", flushPendingWrite);
+    window.addEventListener("pagehide", flushPendingWrite);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      window.removeEventListener("beforeunload", flushPendingWrite);
+      window.removeEventListener("pagehide", flushPendingWrite);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+
+  const loggedInEmail = session?.user?.email?.toLowerCase() || null;
+  const matchedStaff = CLOUD_ENABLED && loggedInEmail
+    ? staffList.find((s) => s.email && s.email.toLowerCase() === loggedInEmail)
+    : null;
+  const activeStaff = CLOUD_ENABLED
+    ? matchedStaff
+    : (staffList.find((s) => s.id === selectedStaffId) || staffList[0]);
+  const role = activeStaff?.role;
+  const currentPermissions = activeStaff?.permissions;
+
+  const logout = () => supabase.auth.signOut();
 
   const hasAccess = (moduleKey) => hasPerm(currentPermissions, moduleKey, "view");
   const selectedOrder = orders.find((o) => o.id === selectedOrderId) || null;
@@ -2069,8 +2311,8 @@ export default function App() {
   };
 
   // 點8：權限管理操作
-  const addStaff = (name, roleValue) =>
-    setStaffList((prev) => [...prev, { id: uid("staff"), name, role: roleValue, permissions: clonePermissions(DEFAULT_ROLE_PERMISSIONS[roleValue]) }]);
+  const addStaff = (name, roleValue, email) =>
+    setStaffList((prev) => [...prev, { id: uid("staff"), name, email: (email || "").trim(), role: roleValue, permissions: clonePermissions(DEFAULT_ROLE_PERMISSIONS[roleValue]) }]);
 
   const deleteStaff = (staffId) => {
     setStaffList((prev) => {
@@ -2089,6 +2331,43 @@ export default function App() {
           : s
       )
     );
+
+  const updateStaffEmail = (staffId, email) =>
+    setStaffList((prev) => prev.map((s) => (s.id === staffId ? { ...s, email } : s)));
+
+  // ---- 雲端模式的登入／載入畫面 ----
+  if (CLOUD_ENABLED && !authChecked) {
+    return (
+      <div className="min-h-screen bg-stone-50 flex items-center justify-center">
+        <Loader2 size={24} className="animate-spin text-slate-300" />
+      </div>
+    );
+  }
+  if (CLOUD_ENABLED && !session) {
+    return <LoginScreen onLogin={() => {}} />;
+  }
+  if (CLOUD_ENABLED && !cloudDataLoaded) {
+    return (
+      <div className="min-h-screen bg-stone-50 flex flex-col items-center justify-center gap-3 font-body">
+        <Loader2 size={24} className="animate-spin text-slate-300" />
+        <div className="text-sm text-slate-400">正在同步雲端資料…</div>
+      </div>
+    );
+  }
+  if (CLOUD_ENABLED && !matchedStaff) {
+    return (
+      <div className="min-h-screen bg-stone-50 flex items-center justify-center p-4 font-body">
+        <div className="max-w-sm bg-white rounded-xl shadow-xl border border-slate-100 p-6 text-center">
+          <AlertTriangle size={28} className="text-amber-500 mx-auto mb-2" />
+          <h2 className="font-bold text-slate-800 mb-1">帳號尚未設定權限</h2>
+          <p className="text-sm text-slate-500 mb-4">
+            已使用 <span className="font-mono">{loggedInEmail}</span> 登入成功，但管理員尚未在「權限管理」為此信箱建立對應的權限設定，請聯繫主管處理。
+          </p>
+          <button onClick={logout} className="text-sm bg-slate-100 hover:bg-slate-200 text-slate-600 rounded px-4 py-2">登出</button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-stone-50 text-slate-800 flex flex-col">
@@ -2144,15 +2423,24 @@ export default function App() {
           )}
           <div className="flex items-center gap-2 bg-slate-800 rounded-full pl-3 pr-1 py-1">
             <Building2 size={14} className="text-slate-400" />
-            <select
-              value={selectedStaffId}
-              onChange={(e) => handleStaffChange(e.target.value)}
-              className="bg-transparent text-sm text-white focus:outline-none pr-1"
-            >
-              {staffList.map((s) => (
-                <option key={s.id} value={s.id} className="text-slate-900">{s.name}（{ROLE_LABELS[s.role]}）</option>
-              ))}
-            </select>
+            {CLOUD_ENABLED ? (
+              <>
+                <span className="text-sm text-white pr-1">{activeStaff.name}</span>
+                <button onClick={logout} title="登出" className="text-slate-400 hover:text-white p-1">
+                  <LogOut size={14} />
+                </button>
+              </>
+            ) : (
+              <select
+                value={selectedStaffId}
+                onChange={(e) => handleStaffChange(e.target.value)}
+                className="bg-transparent text-sm text-white focus:outline-none pr-1"
+              >
+                {staffList.map((s) => (
+                  <option key={s.id} value={s.id} className="text-slate-900">{s.name}（{ROLE_LABELS[s.role]}）</option>
+                ))}
+              </select>
+            )}
           </div>
         </div>
       </header>
@@ -2160,7 +2448,7 @@ export default function App() {
       <div className="flex flex-1 min-h-0">
         <aside className="w-56 bg-white border-r border-slate-100 p-3 flex flex-col gap-1 font-body">
           <div className="text-[11px] text-slate-400 px-2 mb-2 leading-snug">
-            模擬登入：<span className="font-medium text-slate-600">{activeStaff.name}</span>（{ROLE_LABELS[role]}）
+            {CLOUD_ENABLED ? "登入身份" : "模擬登入"}：<span className="font-medium text-slate-600">{activeStaff.name}</span>（{ROLE_LABELS[role]}）
             <div className="mt-0.5">{ROLE_DESC[role]}</div>
           </div>
           {MODULE_META.filter((m) => hasAccess(m.key)).map((m) => {
@@ -2251,6 +2539,7 @@ export default function App() {
         onAddStaff={addStaff}
         onDeleteStaff={deleteStaff}
         onTogglePermission={toggleStaffPermission}
+        onUpdateEmail={updateStaffEmail}
         webhookUrl={sheetWebhookUrl}
         onWebhookChange={setSheetWebhookUrl}
         exportLog={exportLog}
