@@ -1573,7 +1573,7 @@ function QuickRoutineOrderModal({ open, onClose, onSubmit }) {
    十二、權限管理 + Google 試算表匯出設定（點8、點9，僅主管可開啟）
    ============================================================ */
 
-function PermissionsAdminModal({ open, onClose, staffList, onAddStaff, onDeleteStaff, onTogglePermission, onUpdateEmail, webhookUrl, onWebhookChange, exportLog }) {
+function PermissionsAdminModal({ open, onClose, staffList, onAddStaff, onDeleteStaff, onTogglePermission, onUpdateEmail, onUpdateName, webhookUrl, onWebhookChange, exportLog }) {
   const [newStaff, setNewStaff] = useState({ name: "", email: "", role: ROLE.DESIGN });
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const [expandedIds, setExpandedIds] = useState(new Set());
@@ -1680,17 +1680,27 @@ function PermissionsAdminModal({ open, onClose, staffList, onAddStaff, onDeleteS
                     </button>
                     {isOpen && (
                       <div className="p-3 border-t border-slate-100">
-                        {CLOUD_ENABLED && (
-                          <div className="mb-3">
-                            <label className="text-xs text-slate-500 block mb-1">登入 Email（需與 Supabase 帳號一致）</label>
+                        <div className="mb-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <div>
+                            <label className="text-xs text-slate-500 block mb-1">姓名</label>
                             <input
-                              value={s.email || ""}
-                              onChange={(e) => onUpdateEmail(s.id, e.target.value)}
-                              placeholder="you@example.com"
-                              className="w-full max-w-sm border border-slate-200 rounded px-2 py-1.5 text-sm font-mono"
+                              value={s.name}
+                              onChange={(e) => onUpdateName(s.id, e.target.value)}
+                              className="w-full border border-slate-200 rounded px-2 py-1.5 text-sm"
                             />
                           </div>
-                        )}
+                          {CLOUD_ENABLED && (
+                            <div>
+                              <label className="text-xs text-slate-500 block mb-1">登入 Email（需與 Supabase 帳號一致）</label>
+                              <input
+                                value={s.email || ""}
+                                onChange={(e) => onUpdateEmail(s.id, e.target.value)}
+                                placeholder="you@example.com"
+                                className="w-full border border-slate-200 rounded px-2 py-1.5 text-sm font-mono"
+                              />
+                            </div>
+                          )}
+                        </div>
                         <div className="overflow-x-auto">
                         <table className="w-full text-xs">
                           <thead>
@@ -2335,6 +2345,9 @@ export default function App() {
   const updateStaffEmail = (staffId, email) =>
     setStaffList((prev) => prev.map((s) => (s.id === staffId ? { ...s, email } : s)));
 
+  const updateStaffName = (staffId, name) =>
+    setStaffList((prev) => prev.map((s) => (s.id === staffId ? { ...s, name } : s)));
+
   // ---- 雲端模式的登入／載入畫面 ----
   if (CLOUD_ENABLED && !authChecked) {
     return (
@@ -2540,6 +2553,7 @@ export default function App() {
         onDeleteStaff={deleteStaff}
         onTogglePermission={toggleStaffPermission}
         onUpdateEmail={updateStaffEmail}
+        onUpdateName={updateStaffName}
         webhookUrl={sheetWebhookUrl}
         onWebhookChange={setSheetWebhookUrl}
         exportLog={exportLog}
