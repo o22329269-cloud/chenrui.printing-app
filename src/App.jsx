@@ -70,13 +70,15 @@ function sortByProductionDate(list) {
 const ROLE = { ADMIN: "admin_sales", DESIGN: "design_prepress", DELIVERY: "delivery" };
 
 const ROLE_LABELS = {
-  [ROLE.ADMIN]: "業務／主管",
-  [ROLE.DESIGN]: "設計／製稿發稿人員",
-  [ROLE.DELIVERY]: "外務／送貨員",
+  [ROLE.ADMIN]: "主管",
+  [ROLE.SALES]: "業務"
+  [ROLE.DESIGN]: "設計",
+  [ROLE.DELIVERY]: "外務",
 };
 
 const ROLE_DESC = {
   [ROLE.ADMIN]: "最高權限，全部區塊皆可檢視與編輯，路線安排的清空／刪除、權限管理為主管專屬功能",
+  [ROLE.SALES]: "可使用區塊依主管於「權限管理」設定為準",
   [ROLE.DESIGN]: "可使用區塊依主管於「權限管理」設定為準",
   [ROLE.DELIVERY]: "可使用區塊依主管於「權限管理」設定為準",
 };
