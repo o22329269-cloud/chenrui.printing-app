@@ -235,7 +235,7 @@ function stageVisual(order) {
 const TRANSITIONS = {
   [S.QUOTE_PENDING]: [{
     label: "完成報價", to: S.QUOTE_DONE, variant: "primary",
-    fields: [{ key: "quotePrice", label: "報價金額（NT$）", type: "text", required: true }],
+    isQuoteForm: true,
   }],
   [S.QUOTE_DONE]: [
     { label: "需議價（退回待報價）", to: S.NEED_NEGOTIATE, variant: "warn" },
@@ -279,16 +279,18 @@ const MODULE_STATUS_MAP = {
 
 const DELIVERY_DASHBOARD_STATUSES = [S.IND_NEW_PLATEOUT, S.IND_PRODUCTION, S.ARRIVAL, S.QC_FAIL, S.SHIPPING_OUT, S.DELIVERY_ROUTE];
 
-const ROUTINE_PRODUCTS = ["名片", "布條(帆布輸出)", "貼紙", "海報", "DM 傳單", "信封", "摺頁", "桌曆", "提袋", "其他（自行輸入）"];
+const ROUTINE_PRODUCTS = ["名片", "貼紙", "DM", "布條", "其他（自行輸入）"];
 
 const TASK_TYPE_LABELS = {
   delivery: "出貨配送",
   pickup: "加工取件",
   transfer: "轉送下一站",
   sample_pickup: "客戶取樣",
-  sample_deliver: "送樣",
-  invoice: "送發票",
-  custom: "其他任務",
+  sample_deliver: "客戶送樣",
+  manual_pickup: "取件",
+  manual_delivery: "送件",
+  invoice: "送發票", // 舊資料相容用，新增任務選單已不提供
+  custom: "其他",
 };
 const TASK_TYPE_BADGE = {
   delivery: "bg-slate-100 text-slate-700 border-slate-300",
@@ -296,9 +298,13 @@ const TASK_TYPE_BADGE = {
   transfer: "bg-cyan-50 text-cyan-700 border-cyan-200",
   sample_pickup: "bg-amber-50 text-amber-700 border-amber-200",
   sample_deliver: "bg-amber-50 text-amber-700 border-amber-200",
+  manual_pickup: "bg-emerald-50 text-emerald-700 border-emerald-200",
+  manual_delivery: "bg-cyan-50 text-cyan-700 border-cyan-200",
   invoice: "bg-fuchsia-50 text-fuchsia-700 border-fuchsia-200",
   custom: "bg-slate-50 text-slate-500 border-slate-200",
 };
+// 點3：「新增任務」下拉選單只提供這幾種（其餘為系統自動產生或舊資料相容用）
+const MANUAL_TASK_TYPES = ["sample_pickup", "sample_deliver", "manual_pickup", "manual_delivery", "custom"];
 const STRUCTURED_TASK_TYPES = ["pickup", "transfer"];
 
 /* ============================================================
@@ -309,7 +315,7 @@ function makeOrder(id, orderNo, customer, product, qty, status, extra = {}) {
   return {
     id, orderNo, customer, product, qty,
     status, meta: {}, plateType: null, plateMode: null, items: [],
-    paper: null, postProcessing: null, quotePrice: null,
+    paper: null, postProcessing: null, quotePrice: null, quoteOptions: [],
     routine: false, reworkFlag: false, reworkAt: null,
     routeArranged: false, productionStartDate: null, completedAt: null,
     updatedAt: Date.now(),
@@ -322,7 +328,7 @@ function initialOrders() {
   return [
     makeOrder(1, "CR-2026-0101", "台北星辰貿易", "彩色名片 500 張", 500, S.QUOTE_PENDING, { paper: "300gsm 雪銅卡", postProcessing: "無" }),
     makeOrder(26, "CR-2026-0126", "赤崁蜜餞行", "禮盒 貼標", 1200, S.QUOTE_PENDING, {
-      paper: "貼紙專用紙", postProcessing: "無", quotePrice: "6,800",
+      paper: "貼紙專用紙", postProcessing: "無", quotePrice: "1200個 NT$6,800",
       history: [
         { from: null, to: S.QUOTE_PENDING, by: "系統", at: "07/06", note: "建立訂單" },
         { from: S.QUOTE_PENDING, to: S.QUOTE_DONE, by: "業務／主管", at: "07/07", note: "完成報價" },
@@ -332,7 +338,15 @@ function initialOrders() {
     }),
     makeOrder(2, "CR-2026-0102", "橘子文具行", "型錄 A4 32P", 2000, S.QUOTE_DONE, { paper: "157gsm 銅版紙", postProcessing: "騎馬釘" }),
     makeOrder(3, "CR-2026-0103", "喜悅婚顧", "喜帖 燙金", 300, S.NEED_NEGOTIATE, { paper: "250gsm 珍珠卡", postProcessing: "燙金" }),
-    makeOrder(4, "CR-2026-0104", "晨光食品", "貼標紙 防水", 5000, S.PRODUCIBLE, { paper: "防水合成紙", postProcessing: "上光", quotePrice: "12,500" }),
+    makeOrder(4, "CR-2026-0104", "晨光食品", "貼標紙 防水", 5000, S.PRODUCIBLE, {
+      paper: "防水合成紙", postProcessing: "上光",
+      quotePrice: "3000個 NT$8,400、5000個 NT$12,500、10000個 NT$21,000",
+      quoteOptions: [
+        { qty: "3000", unitPrice: "2.8", total: "8400" },
+        { qty: "5000", unitPrice: "2.5", total: "12500" },
+        { qty: "10000", unitPrice: "2.1", total: "21000" },
+      ],
+    }),
     makeOrder(5, "CR-2026-0105", "藍海科技", "產品手冊 20P", 1000, S.FILE_CHECKING, { paper: "157gsm 銅版紙", postProcessing: "膠裝" }),
     makeOrder(6, "CR-2026-0106", "大安診所", "診所海報 A2", 50, S.IND_NEW_PROOF, { plateType: "independent", plateMode: "new", paper: "157gsm 銅版紙", postProcessing: "無" }),
     makeOrder(7, "CR-2026-0107", "小森咖啡", "杯套 單色", 3000, S.IND_NEW_CONFIRMED, { plateType: "independent", plateMode: "new", paper: "牛皮紙", postProcessing: "軋型" }),
@@ -340,12 +354,12 @@ function initialOrders() {
     makeOrder(9, "CR-2026-0109", "永昌五金", "型錄舊版加印", 1500, S.IND_OLD, { plateType: "independent", plateMode: "old", paper: "157gsm 銅版紙", postProcessing: "無" }),
     makeOrder(10, "CR-2026-0110", "多多寵物", "DM 傳單 合版", 10000, S.COMBINED, { plateType: "combined", paper: "128gsm 銅版紙", postProcessing: "無" }),
     makeOrder(11, "CR-2026-0111", "日昇建設", "桌曆 13 頁", 200, S.COMBINED_PRODUCTION, { plateType: "combined", paper: "230gsm 美術紙", postProcessing: "打孔＋線圈", productionStartDate: "07/05" }),
-    makeOrder(12, "CR-2026-0112", "青田素食", "菜單摺頁", 600, S.QC_FAIL, { plateType: "combined", paper: "200gsm 雪銅卡", postProcessing: "摺頁", meta: { 不合格原因: "四色套印偏移" }, productionStartDate: "07/03", quotePrice: "8,400" }),
-    makeOrder(13, "CR-2026-0113", "新葉法律事務所", "信封 燙銀", 2000, S.ARRIVAL, { paper: "120gsm 模造紙", postProcessing: "燙銀", productionStartDate: "07/02", quotePrice: "15,600" }),
-    makeOrder(14, "CR-2026-0114", "禾風設計工作室", "提袋 牛皮紙", 1200, S.SHIPPING_OUT, { paper: "牛皮紙", postProcessing: "打孔穿繩", productionStartDate: "07/01", quotePrice: "22,000" }),
-    makeOrder(15, "CR-2026-0115", "泰美旅行社", "旅遊手冊", 3000, S.DELIVERY_ROUTE, { paper: "157gsm 銅版紙", postProcessing: "膠裝", productionStartDate: "06/28", quotePrice: "68,000" }),
-    makeOrder(17, "CR-2026-0117", "康是美藥局", "海報 A1", 100, S.ARRIVAL, { paper: "150gsm 銅版紙", postProcessing: "無", productionStartDate: "07/06", quotePrice: "3,200" }),
-    makeOrder(18, "CR-2026-0118", "小可甜點", "貼標 圓形", 8000, S.SHIPPING_OUT, { paper: "貼紙專用紙", postProcessing: "圓形裁型", productionStartDate: "07/04", routeArranged: false, quotePrice: "9,600" }),
+    makeOrder(12, "CR-2026-0112", "青田素食", "菜單摺頁", 600, S.QC_FAIL, { plateType: "combined", paper: "200gsm 雪銅卡", postProcessing: "摺頁", meta: { 不合格原因: "四色套印偏移" }, productionStartDate: "07/03", quotePrice: "600個 NT$8,400" }),
+    makeOrder(13, "CR-2026-0113", "新葉法律事務所", "信封 燙銀", 2000, S.ARRIVAL, { paper: "120gsm 模造紙", postProcessing: "燙銀", productionStartDate: "07/02", quotePrice: "2000個 NT$15,600" }),
+    makeOrder(14, "CR-2026-0114", "禾風設計工作室", "提袋 牛皮紙", 1200, S.SHIPPING_OUT, { paper: "牛皮紙", postProcessing: "打孔穿繩", productionStartDate: "07/01", quotePrice: "1200個 NT$22,000" }),
+    makeOrder(15, "CR-2026-0115", "泰美旅行社", "旅遊手冊", 3000, S.DELIVERY_ROUTE, { paper: "157gsm 銅版紙", postProcessing: "膠裝", productionStartDate: "06/28", quotePrice: "3000個 NT$68,000" }),
+    makeOrder(17, "CR-2026-0117", "康是美藥局", "海報 A1", 100, S.ARRIVAL, { paper: "150gsm 銅版紙", postProcessing: "無", productionStartDate: "07/06", quotePrice: "100個 NT$3,200" }),
+    makeOrder(18, "CR-2026-0118", "小可甜點", "貼標 圓形", 8000, S.SHIPPING_OUT, { paper: "貼紙專用紙", postProcessing: "圓形裁型", productionStartDate: "07/04", routeArranged: false, quotePrice: "8000個 NT$9,600" }),
     makeOrder(24, "CR-2026-0124", "全興包裝", "彩盒（退回補件件）", 500, S.IND_PRODUCTION, {
       plateType: "independent", plateMode: "new", reworkFlag: true, reworkAt: "07/08", paper: "300gsm 灰底卡", postProcessing: "燙金＋軋型",
       productionStartDate: "07/01",
@@ -508,10 +522,10 @@ function OrderCard({ order, onOpen }) {
         <div className="font-semibold text-slate-800 text-sm mt-0.5 truncate">{order.customer}</div>
         <div className="text-slate-500 text-xs mt-1 truncate">{order.product} × {order.qty}</div>
         {order.status === S.PRODUCIBLE && !order.routine && order.quotePrice && (
-          <div className="text-sm font-bold text-orange-600 mt-1.5">NT$ {order.quotePrice}</div>
+          <div className="text-sm font-bold text-orange-600 mt-1.5 truncate" title={order.quotePrice}>{order.quotePrice}</div>
         )}
         {order.status === S.QUOTE_PENDING && !order.routine && order.quotePrice && (
-          <div className="text-sm font-bold text-red-600 mt-1.5">先前報價：NT$ {order.quotePrice}</div>
+          <div className="text-sm font-bold text-red-600 mt-1.5 truncate" title={order.quotePrice}>先前報價：{order.quotePrice}</div>
         )}
       </button>
     );
@@ -900,16 +914,14 @@ function DeliveryRouteView({ tasks, permissions, onAddTask, onMove, onToggleDone
 
       {formOpen && canAct && (
         <div className="bg-white border border-slate-200 rounded-lg p-4 mb-4 space-y-2">
-          <div className="text-xs text-slate-400 mb-1">可新增客戶取樣、送樣、送發票等隨機任務，加入後排在清單最末，再用上下箭頭調整順序即可。</div>
+          <div className="text-xs text-slate-400 mb-1">可新增客戶取樣、客戶送樣、取件、送件等隨機任務，加入後排在清單最末，再用上下箭頭調整順序即可。</div>
           <div className="grid grid-cols-2 gap-2">
             <select
               value={form.type}
               onChange={(e) => setForm((f) => ({ ...f, type: e.target.value }))}
               className="border border-slate-200 rounded px-2 py-1.5 text-sm"
             >
-              {Object.entries(TASK_TYPE_LABELS)
-                .filter(([k]) => !["delivery", "pickup", "transfer"].includes(k))
-                .map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+              {MANUAL_TASK_TYPES.map((k) => <option key={k} value={k}>{TASK_TYPE_LABELS[k]}</option>)}
             </select>
             <input
               placeholder="相關訂單編號（選填）"
@@ -1105,6 +1117,82 @@ function CompletedTasksView({ tasks, permissions, onToggleDone, onClearAll }) {
    九、訂單詳情 Modal
    ============================================================ */
 
+function QuoteRowsForm({ onSubmit }) {
+  const [rows, setRows] = useState([{ qty: "", unitPrice: "", total: "" }]);
+
+  const updateRow = (idx, patch) => {
+    setRows((prev) =>
+      prev.map((r, i) => {
+        if (i !== idx) return r;
+        const next = { ...r, ...patch };
+        if (next.qty && next.unitPrice) {
+          const q = Number(next.qty);
+          const u = Number(next.unitPrice);
+          if (!isNaN(q) && !isNaN(u)) next.total = String(q * u);
+        }
+        return next;
+      })
+    );
+  };
+
+  const addRow = () => setRows((prev) => [...prev, { qty: "", unitPrice: "", total: "" }]);
+  const removeRow = (idx) => setRows((prev) => prev.filter((_, i) => i !== idx));
+
+  const validRows = rows.filter((r) => r.qty && r.total);
+  const canSubmit = validRows.length > 0;
+
+  const submit = () => {
+    if (!canSubmit) return;
+    const summary = validRows.map((r) => `${r.qty}個 NT$${Number(r.total).toLocaleString()}`).join("、");
+    onSubmit(summary, validRows);
+  };
+
+  return (
+    <div className="p-3 bg-slate-50 space-y-2">
+      <div className="text-xs text-slate-500 mb-1">可新增單一品項的多種數量報價，若有填單價會自動算出總價（也可以直接手動填總價）</div>
+      {rows.map((r, idx) => (
+        <div key={idx} className="flex items-center gap-1.5">
+          <input
+            placeholder="數量"
+            value={r.qty}
+            onChange={(e) => updateRow(idx, { qty: e.target.value })}
+            className="w-20 text-sm border border-slate-200 rounded px-2 py-1.5"
+          />
+          <input
+            placeholder="單價（選填）"
+            value={r.unitPrice}
+            onChange={(e) => updateRow(idx, { unitPrice: e.target.value })}
+            className="w-24 text-sm border border-slate-200 rounded px-2 py-1.5"
+          />
+          <span className="text-xs text-slate-400 shrink-0">→</span>
+          <input
+            placeholder="總價 *"
+            value={r.total}
+            onChange={(e) => updateRow(idx, { total: e.target.value })}
+            className="flex-1 min-w-0 text-sm border border-slate-200 rounded px-2 py-1.5"
+          />
+          {rows.length > 1 && (
+            <button onClick={() => removeRow(idx)} className="text-slate-300 hover:text-red-500 shrink-0">
+              <Trash2 size={14} />
+            </button>
+          )}
+        </div>
+      ))}
+      <button onClick={addRow} className="text-xs bg-slate-100 hover:bg-slate-200 text-slate-600 rounded px-3 py-1.5">
+        ＋ 新增數量選項
+      </button>
+      <button
+        onClick={submit}
+        disabled={!canSubmit}
+        className="w-full bg-slate-800 hover:bg-slate-900 disabled:bg-slate-200 disabled:text-slate-400 text-white text-sm rounded py-1.5 mt-1"
+      >
+        確認送出
+      </button>
+      {!canSubmit && <div className="text-[11px] text-red-500">請至少填寫一組數量與總價</div>}
+    </div>
+  );
+}
+
 function ActionRow({ order, action, permissions, onTransition, onNavigateModule }) {
   const currentModule = STATUS_META[order.status].module;
   const requiredModule = action.overrideModule || currentModule;
@@ -1182,7 +1270,7 @@ function ActionRow({ order, action, permissions, onTransition, onNavigateModule 
   return (
     <div className="border border-slate-100 rounded-lg overflow-hidden">
       <button
-        onClick={() => (action.fields ? setOpen((v) => !v) : onTransition(order.id, action, {}))}
+        onClick={() => ((action.fields || action.isQuoteForm) ? setOpen((v) => !v) : onTransition(order.id, action, {}))}
         className={`w-full flex items-center justify-between px-3 py-2 text-sm font-medium ${variantClass}`}
       >
         <span className="flex items-center gap-1.5">{action.label}</span>
@@ -1192,6 +1280,14 @@ function ActionRow({ order, action, permissions, onTransition, onNavigateModule 
         <div className="px-3 py-1.5 text-[11px] text-slate-400 bg-slate-50 border-t border-slate-100">
           將依原製作路徑退回：{order.plateType === "combined" ? "合版製作中" : "獨立版製作中"}
         </div>
+      )}
+      {open && action.isQuoteForm && (
+        <QuoteRowsForm
+          onSubmit={(summary, quoteOptions) => {
+            onTransition(order.id, action, { quotePrice: summary, quoteOptions });
+            setOpen(false);
+          }}
+        />
       )}
       {open && action.fields && (
         <div className="p-3 bg-slate-50 space-y-2">
@@ -1300,10 +1396,20 @@ function OrderModal({ order, permissions, onClose, onTransition, onNavigateModul
                   </div>
                 )}
                 {order.status === S.ARRIVAL && !order.routine && order.quotePrice && (
-                  <div className="text-sm font-bold text-orange-600 mt-1">報價金額（可製作階段）：NT$ {order.quotePrice}</div>
+                  <div className="text-sm font-bold text-orange-600 mt-1">報價金額（可製作階段）：{order.quotePrice}</div>
                 )}
                 {order.status === S.QUOTE_PENDING && !order.routine && order.quotePrice && (
-                  <div className="text-sm font-bold text-red-600 mt-1">先前報價：NT$ {order.quotePrice}（需重新報價）</div>
+                  <div className="text-sm font-bold text-red-600 mt-1">先前報價：{order.quotePrice}（需重新報價）</div>
+                )}
+                {!order.routine && order.quoteOptions && order.quoteOptions.length > 1 && (
+                  <div className="mt-1.5 text-xs bg-slate-50 rounded-lg p-2 space-y-0.5">
+                    {order.quoteOptions.map((r, i) => (
+                      <div key={i} className="flex justify-between text-slate-500">
+                        <span>{r.qty} 個{r.unitPrice ? `（單價 NT$${r.unitPrice}）` : ""}</span>
+                        <span className="font-medium text-slate-700">NT$ {Number(r.total).toLocaleString()}</span>
+                      </div>
+                    ))}
+                  </div>
                 )}
               </>
             )}
@@ -1517,14 +1623,14 @@ function AddOrderModal({ open, onClose, onSubmit }) {
    ============================================================ */
 
 function QuickRoutineOrderModal({ open, onClose, onSubmit }) {
-  const [form, setForm] = useState({ customer: "", product: ROUTINE_PRODUCTS[0], customProduct: "", qty: "", note: "" });
+  const [form, setForm] = useState({ customer: "", product: ROUTINE_PRODUCTS[0], customProduct: "", itemName: "", spec: "", qty: "", note: "" });
   if (!open) return null;
   const finalProduct = form.product === "其他（自行輸入）" ? form.customProduct : form.product;
   const canSubmit = form.customer.trim() && finalProduct.trim();
   const submit = () => {
     if (!canSubmit) return;
-    onSubmit({ customer: form.customer, product: finalProduct, qty: form.qty, note: form.note });
-    setForm({ customer: "", product: ROUTINE_PRODUCTS[0], customProduct: "", qty: "", note: "" });
+    onSubmit({ customer: form.customer, product: finalProduct, itemName: form.itemName, spec: form.spec, qty: form.qty, note: form.note });
+    setForm({ customer: "", product: ROUTINE_PRODUCTS[0], customProduct: "", itemName: "", spec: "", qty: "", note: "" });
   };
   return (
     <div className="fixed inset-0 bg-slate-900/40 z-50 overflow-y-auto" onClick={onClose}>
@@ -1558,6 +1664,14 @@ function QuickRoutineOrderModal({ open, onClose, onSubmit }) {
                 <input value={form.customProduct} onChange={(e) => setForm((f) => ({ ...f, customProduct: e.target.value }))} className="w-full border border-slate-200 rounded px-2 py-1.5 text-sm" />
               </div>
             )}
+            <div>
+              <label className="text-xs text-slate-500 block mb-1">品名</label>
+              <input value={form.itemName} onChange={(e) => setForm((f) => ({ ...f, itemName: e.target.value }))} className="w-full border border-slate-200 rounded px-2 py-1.5 text-sm" placeholder="選填，例：生日賀卡" />
+            </div>
+            <div>
+              <label className="text-xs text-slate-500 block mb-1">規格</label>
+              <input value={form.spec} onChange={(e) => setForm((f) => ({ ...f, spec: e.target.value }))} className="w-full border border-slate-200 rounded px-2 py-1.5 text-sm" placeholder="選填，例：9x5.4cm 雙面全彩" />
+            </div>
             <div>
               <label className="text-xs text-slate-500 block mb-1">數量</label>
               <input value={form.qty} onChange={(e) => setForm((f) => ({ ...f, qty: e.target.value }))} className="w-full border border-slate-200 rounded px-2 py-1.5 text-sm" />
@@ -2091,6 +2205,7 @@ export default function App() {
         });
         // 報價金額另存一份專屬欄位，之後無論是否議價、走到哪個階段都能穩定取用
         const newQuotePrice = formData.quotePrice ? formData.quotePrice : o.quotePrice;
+        const newQuoteOptions = formData.quoteOptions ? formData.quoteOptions : o.quoteOptions;
         // 點7：安排送貨路線後，訂單仍停留在「已開單待出貨」，等待路線安排中按下「完成訂單」
         const finalStatus = arrangingRoute ? o.status : targetStatus;
         return {
@@ -2100,12 +2215,13 @@ export default function App() {
           plateType: action.setPlateType ?? o.plateType,
           plateMode: action.setPlateMode ?? o.plateMode,
           quotePrice: newQuotePrice,
+          quoteOptions: newQuoteOptions,
           productionStartDate: (enteringProduction && !o.productionStartDate) ? formattedToday() : o.productionStartDate,
           reworkFlag: isReworkEntry ? true : (targetStatus === S.ARRIVAL ? false : o.reworkFlag),
           reworkAt: isReworkEntry ? formattedToday() : o.reworkAt,
           meta: { ...o.meta, ...labeledData },
           updatedAt: Date.now(),
-          history: [...o.history, { from: o.status, to: targetStatus, by: ROLE_LABELS[role], at: formattedToday(), note: action.label }],
+          history: [...o.history, { from: o.status, to: targetStatus, by: activeStaff.name, at: formattedToday(), note: action.label }],
         };
       })
     );
@@ -2129,7 +2245,7 @@ export default function App() {
         makeOrder(nextId, orderNo, data.customer, data.product, data.qty || "-", S.QUOTE_PENDING, {
           paper: data.paper, postProcessing: data.postProcessing,
           meta: data.note ? { 備註: data.note } : {},
-          history: [{ from: null, to: S.QUOTE_PENDING, by: ROLE_LABELS[role], at: formattedToday(), note: "建立訂單" }],
+          history: [{ from: null, to: S.QUOTE_PENDING, by: activeStaff.name, at: formattedToday(), note: "建立訂單" }],
         }),
       ];
     });
@@ -2141,13 +2257,15 @@ export default function App() {
       const nextId = nextOrderId(prev);
       const orderNo = `RT-2026-${prev.filter((o) => o.orderNo.startsWith("RT-2026-")).length + 1}`;
       const meta = { 建檔方式: "常規品項快速建檔（免報價）" };
+      if (data.itemName) meta.品名 = data.itemName;
+      if (data.spec) meta.規格 = data.spec;
       if (data.note) meta.備註 = data.note;
       return [
         ...prev,
         makeOrder(nextId, orderNo, data.customer, data.product, data.qty || "-", S.FILE_CHECKING, {
           routine: true,
           meta,
-          history: [{ from: null, to: S.FILE_CHECKING, by: ROLE_LABELS[role], at: formattedToday(), note: "常規品項快速建檔，直接進入已來檔核對中" }],
+          history: [{ from: null, to: S.FILE_CHECKING, by: activeStaff.name, at: formattedToday(), note: "常規品項快速建檔，直接進入已來檔核對中" }],
         }),
       ];
     });
@@ -2166,7 +2284,7 @@ export default function App() {
     updateOrder(orderId, (o) => ({
       ...o,
       status: previousStatus,
-      history: [...o.history, { from: o.status, to: previousStatus, by: ROLE_LABELS[role], at: formattedToday(), note: "手動回到上一步" }],
+      history: [...o.history, { from: o.status, to: previousStatus, by: activeStaff.name, at: formattedToday(), note: "手動回到上一步" }],
     }));
   };
 
@@ -2216,7 +2334,7 @@ export default function App() {
       ...o,
       status: S.IND_PRODUCTION,
       productionStartDate: o.productionStartDate || formattedToday(),
-      history: [...o.history, { from: o.status, to: S.IND_PRODUCTION, by: ROLE_LABELS[role], at: formattedToday(), note: "填寫完成，進入獨立版製作中" }],
+      history: [...o.history, { from: o.status, to: S.IND_PRODUCTION, by: activeStaff.name, at: formattedToday(), note: "填寫完成，進入獨立版製作中" }],
     }));
   };
 
@@ -2290,7 +2408,7 @@ export default function App() {
               ...o,
               status: S.SHIPPING_OUT,
               updatedAt: Date.now(),
-              history: [...o.history, { from: o.status, to: S.SHIPPING_OUT, by: ROLE_LABELS[role], at: formattedToday(), note: "刪除送貨路線任務，退回已開單待出貨" }],
+              history: [...o.history, { from: o.status, to: S.SHIPPING_OUT, by: activeStaff.name, at: formattedToday(), note: "刪除送貨路線任務，退回已開單待出貨" }],
             };
           }
           return o;
@@ -2355,7 +2473,7 @@ export default function App() {
           routeArranged: false,
           completedAt: now,
           items: (!o.routine && o.plateType === "independent") ? [] : o.items,
-          history: [...o.history, { from: o.status, to: S.DELIVERY_ROUTE, by: ROLE_LABELS[role], at: formattedToday(), note: "完成訂單" }],
+          history: [...o.history, { from: o.status, to: S.DELIVERY_ROUTE, by: activeStaff.name, at: formattedToday(), note: "完成訂單" }],
         }));
       }
     }
