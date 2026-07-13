@@ -1877,6 +1877,8 @@ export default function App() {
   const [session, setSession] = useState(null);
   const [authChecked, setAuthChecked] = useState(!CLOUD_ENABLED);
   const [cloudDataLoaded, setCloudDataLoaded] = useState(!CLOUD_ENABLED);
+  const [cloudError, setCloudError] = useState("");
+  const [syncStatus, setSyncStatus] = useState("idle"); // idle | saving | saved | error
   const isRemoteUpdate = useRef(false);
 
   // 檢查登入狀態、監聽登入/登出事件
@@ -1911,15 +1913,27 @@ export default function App() {
     (async () => {
       const { data, error } = await supabase.from("app_state").select("data").eq("id", APP_STATE_ROW_ID).maybeSingle();
       if (cancelled) return;
-      if (!error && data?.data) {
+      if (error) {
+        // 讀取失敗（常見原因：資料表不存在、RLS 政策設定錯誤、金鑰不對）
+        setCloudError(`讀取雲端資料失敗：${error.message}`);
+        setCloudDataLoaded(true);
+        return;
+      }
+      if (data?.data) {
         applyRemote(data.data);
       } else {
         // 第一次使用，把目前的示範資料寫進雲端當作初始狀態
-        await supabase.from("app_state").upsert({
-          id: APP_STATE_ROW_ID,
-          data: { orders, deliveryTasks, staffList, exportLog, sheetWebhookUrl },
-        });
+        const { error: seedError } = await supabase.from("app_state").upsert(
+          { id: APP_STATE_ROW_ID, data: { orders, deliveryTasks, staffList, exportLog, sheetWebhookUrl } },
+          { onConflict: "id" }
+        );
+        if (seedError) {
+          setCloudError(`初始化雲端資料失敗：${seedError.message}`);
+          setCloudDataLoaded(true);
+          return;
+        }
       }
+      setCloudError("");
       setCloudDataLoaded(true);
 
       channel = supabase
@@ -1927,7 +1941,11 @@ export default function App() {
         .on("postgres_changes", { event: "*", schema: "public", table: "app_state", filter: `id=eq.${APP_STATE_ROW_ID}` }, (payload) => {
           applyRemote(payload.new?.data);
         })
-        .subscribe();
+        .subscribe((status, err) => {
+          if (status === "CHANNEL_ERROR" || err) {
+            setCloudError(`即時同步連線失敗：${err?.message || status}`);
+          }
+        });
     })();
 
     return () => {
@@ -1941,12 +1959,24 @@ export default function App() {
   const pendingWriteRef = useRef(null);
   const writeTimeoutRef = useRef(null);
 
+  const doUpsert = async (payload) => {
+    setSyncStatus("saving");
+    const { error } = await supabase.from("app_state").upsert({ id: APP_STATE_ROW_ID, data: payload }, { onConflict: "id" });
+    if (error) {
+      setSyncStatus("error");
+      setCloudError(`儲存失敗：${error.message}`);
+    } else {
+      setSyncStatus("saved");
+      setCloudError("");
+    }
+  };
+
   const flushPendingWrite = () => {
     if (!CLOUD_ENABLED || !pendingWriteRef.current) return;
     const payload = pendingWriteRef.current;
     pendingWriteRef.current = null;
     if (writeTimeoutRef.current) { clearTimeout(writeTimeoutRef.current); writeTimeoutRef.current = null; }
-    supabase.from("app_state").upsert({ id: APP_STATE_ROW_ID, data: payload });
+    doUpsert(payload);
   };
 
   useEffect(() => {
@@ -1961,7 +1991,7 @@ export default function App() {
     writeTimeoutRef.current = setTimeout(() => {
       pendingWriteRef.current = null;
       writeTimeoutRef.current = null;
-      supabase.from("app_state").upsert({ id: APP_STATE_ROW_ID, data: snapshot });
+      doUpsert(snapshot);
     }, 600);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orders, deliveryTasks, staffList, exportLog, sheetWebhookUrl]);
@@ -2391,6 +2421,15 @@ export default function App() {
         .font-mono { font-family: 'IBM Plex Mono', monospace; }
       `}</style>
 
+      {CLOUD_ENABLED && cloudError && (
+        <div className="bg-red-600 text-white text-xs px-4 py-2 flex items-center gap-2 flex-wrap">
+          <AlertTriangle size={14} className="shrink-0" />
+          <span className="font-medium">雲端同步發生錯誤：</span>
+          <span className="font-mono break-all">{cloudError}</span>
+          <button onClick={() => setCloudError("")} className="ml-auto shrink-0 underline">關閉</button>
+        </div>
+      )}
+
       <header className="bg-slate-900 text-white px-5 py-3 flex items-center justify-between font-body flex-wrap gap-2">
         <div className="flex items-center gap-3">
           <RegistrationMark size="md" />
@@ -2439,6 +2478,17 @@ export default function App() {
             {CLOUD_ENABLED ? (
               <>
                 <span className="text-sm text-white pr-1">{activeStaff.name}</span>
+                <span
+                  className={`text-[10px] px-1.5 py-0.5 rounded-full mr-1 ${
+                    syncStatus === "saving" ? "bg-amber-500/20 text-amber-300"
+                    : syncStatus === "error" ? "bg-red-500/20 text-red-300"
+                    : syncStatus === "saved" ? "bg-emerald-500/20 text-emerald-300"
+                    : "bg-slate-700 text-slate-400"
+                  }`}
+                  title={cloudError || ""}
+                >
+                  {syncStatus === "saving" ? "儲存中…" : syncStatus === "error" ? "同步失敗" : syncStatus === "saved" ? "已同步" : "待命中"}
+                </span>
                 <button onClick={logout} title="登出" className="text-slate-400 hover:text-white p-1">
                   <LogOut size={14} />
                 </button>
