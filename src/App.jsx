@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import {
   LayoutDashboard, FileText, Layers, PackageSearch, PackageCheck, Route,
   ClipboardList, Lock, X, History, CheckCircle2, ArrowRight,
-  Building2, Search, ChevronRight, Plus, Truck, Send, ChevronUp, ChevronDown,
+  Building2, Search, ChevronRight, ChevronLeft, Plus, Truck, Send, ChevronUp, ChevronDown,
   Pencil, Trash2, Undo2, AlertTriangle, Settings, Users, LogIn, LogOut, Loader2, Mail
 } from "lucide-react";
 import { createClient } from "@supabase/supabase-js";
@@ -67,17 +67,19 @@ function sortByProductionDate(list) {
    一、常數與資料模型定義
    ============================================================ */
 
-const ROLE = { ADMIN: "admin_sales", DESIGN: "design_prepress", DELIVERY: "delivery" };
+// 點3：職位分為四種。MANAGER／DESIGN 底層代碼沿用舊值（admin_sales／design_prepress），
+// 這樣已經同步到雲端的人員資料不會因為改版而對不上、被鎖在外面；SALES 是全新加入的角色。
+const ROLE = { MANAGER: "admin_sales", SALES: "sales", DESIGN: "design_prepress", DELIVERY: "delivery" };
 
 const ROLE_LABELS = {
-  [ROLE.ADMIN]: "主管",
-  [ROLE.SALES]: "業務"
+  [ROLE.MANAGER]: "主管",
+  [ROLE.SALES]: "業務",
   [ROLE.DESIGN]: "設計",
   [ROLE.DELIVERY]: "外務",
 };
 
 const ROLE_DESC = {
-  [ROLE.ADMIN]: "最高權限，全部區塊皆可檢視與編輯，路線安排的清空／刪除、權限管理為主管專屬功能",
+  [ROLE.MANAGER]: "最高權限，預設全區塊可瀏覽／操作／刪除／清空，「權限管理」僅主管可開啟",
   [ROLE.SALES]: "可使用區塊依主管於「權限管理」設定為準",
   [ROLE.DESIGN]: "可使用區塊依主管於「權限管理」設定為準",
   [ROLE.DELIVERY]: "可使用區塊依主管於「權限管理」設定為準",
@@ -131,8 +133,15 @@ function hasPerm(permissions, moduleKey, flag) {
 
 // 預設角色權限樣板（新增人員時的預設值，實際權限之後可在「權限管理」逐項調整，點8）
 const DEFAULT_ROLE_PERMISSIONS = {
-  [ROLE.ADMIN]: buildPermissions(Object.values(MODULE), { view: true, act: true, del: true, clear: true }),
-  [ROLE.DESIGN]: buildPermissions(Object.values(MODULE), { view: true, act: true, del: true, clear: true }),
+  [ROLE.MANAGER]: buildPermissions(Object.values(MODULE), { view: true, act: true, del: true, clear: true }),
+  [ROLE.SALES]: buildPermissions(
+    [MODULE.DASHBOARD, MODULE.QUOTATION, MODULE.ARRIVAL, MODULE.COMPLETED],
+    { view: true, act: true, del: false, clear: false }
+  ),
+  [ROLE.DESIGN]: buildPermissions(
+    [MODULE.DASHBOARD, MODULE.PREPRESS, MODULE.PRODUCTION_QC, MODULE.PLATE_PROGRESS],
+    { view: true, act: true, del: false, clear: false }
+  ),
   [ROLE.DELIVERY]: buildPermissions(
     [MODULE.DASHBOARD, MODULE.ARRIVAL, MODULE.SHIPPING, MODULE.DELIVERY_ROUTE, MODULE.PLATE_PROGRESS, MODULE.COMPLETED_TASKS],
     { view: true, act: true, del: false, clear: false }
@@ -434,10 +443,10 @@ function initialTasks() {
 }
 
 function initialStaff() {
+  // 點2：不再內建示範人員（林設計／陳外務等），只留一個待綁定的主管帳號，
+  // 供全新安裝時第一次登入的「先有雞先有蛋」問題使用（綁定方式見權限管理說明）。
   return [
-    { id: "staff-1", name: "陳經理", email: "", role: ROLE.ADMIN, permissions: clonePermissions(DEFAULT_ROLE_PERMISSIONS[ROLE.ADMIN]) },
-    { id: "staff-2", name: "林設計", email: "", role: ROLE.DESIGN, permissions: clonePermissions(DEFAULT_ROLE_PERMISSIONS[ROLE.DESIGN]) },
-    { id: "staff-3", name: "陳外務", email: "", role: ROLE.DELIVERY, permissions: clonePermissions(DEFAULT_ROLE_PERMISSIONS[ROLE.DELIVERY]) },
+    { id: "staff-1", name: "主管帳號（請改名並綁定 Email）", email: "", role: ROLE.MANAGER, permissions: clonePermissions(DEFAULT_ROLE_PERMISSIONS[ROLE.MANAGER]) },
   ];
 }
 
@@ -1576,7 +1585,7 @@ function QuickRoutineOrderModal({ open, onClose, onSubmit }) {
    ============================================================ */
 
 function PermissionsAdminModal({ open, onClose, staffList, onAddStaff, onDeleteStaff, onTogglePermission, onUpdateEmail, onUpdateName, webhookUrl, onWebhookChange, exportLog }) {
-  const [newStaff, setNewStaff] = useState({ name: "", email: "", role: ROLE.DESIGN });
+  const [newStaff, setNewStaff] = useState({ name: "", email: "", role: ROLE.SALES });
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const [expandedIds, setExpandedIds] = useState(new Set());
   if (!open) return null;
@@ -1644,7 +1653,7 @@ function PermissionsAdminModal({ open, onClose, staffList, onAddStaff, onDeleteS
                   onClick={() => {
                     if (!newStaff.name.trim()) return;
                     onAddStaff(newStaff.name, newStaff.role, newStaff.email);
-                    setNewStaff({ name: "", email: "", role: ROLE.DESIGN });
+                    setNewStaff({ name: "", email: "", role: ROLE.SALES });
                   }}
                   className="bg-fuchsia-600 hover:bg-fuchsia-700 text-white text-sm rounded px-3 py-1.5 shrink-0"
                 >
@@ -1872,6 +1881,7 @@ export default function App() {
   const [showAddOrder, setShowAddOrder] = useState(false);
   const [showQuickRoutine, setShowQuickRoutine] = useState(false);
   const [showPermissionsAdmin, setShowPermissionsAdmin] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [sheetWebhookUrl, setSheetWebhookUrl] = useState("");
   const [exportLog, setExportLog] = useState([]);
 
@@ -2467,7 +2477,7 @@ export default function App() {
               </button>
             </>
           )}
-          {role === ROLE.ADMIN && (
+          {role === ROLE.MANAGER && (
             <button
               onClick={() => setShowPermissionsAdmin(true)}
               className="flex items-center gap-1 bg-slate-700 hover:bg-slate-600 text-white text-sm rounded-full px-3 py-1.5 shrink-0"
@@ -2511,11 +2521,20 @@ export default function App() {
       </header>
 
       <div className="flex flex-1 min-h-0">
-        <aside className="w-56 bg-white border-r border-slate-100 p-3 flex flex-col gap-1 font-body">
-          <div className="text-[11px] text-slate-400 px-2 mb-2 leading-snug">
-            {CLOUD_ENABLED ? "登入身份" : "模擬登入"}：<span className="font-medium text-slate-600">{activeStaff.name}</span>（{ROLE_LABELS[role]}）
-            <div className="mt-0.5">{ROLE_DESC[role]}</div>
-          </div>
+        <aside className={`${sidebarCollapsed ? "w-14" : "w-56"} shrink-0 bg-white border-r border-slate-100 p-3 flex flex-col gap-1 font-body transition-all`}>
+          <button
+            onClick={() => setSidebarCollapsed((v) => !v)}
+            className="flex items-center justify-center gap-1 text-slate-400 hover:text-slate-600 hover:bg-slate-50 rounded-lg py-1.5 mb-1"
+            title={sidebarCollapsed ? "展開側邊欄" : "收合側邊欄"}
+          >
+            {sidebarCollapsed ? <ChevronRight size={16} /> : <><ChevronLeft size={16} /><span className="text-xs">收合</span></>}
+          </button>
+          {!sidebarCollapsed && (
+            <div className="text-[11px] text-slate-400 px-2 mb-2 leading-snug">
+              {CLOUD_ENABLED ? "登入身份" : "模擬登入"}：<span className="font-medium text-slate-600">{activeStaff.name}</span>（{ROLE_LABELS[role]}）
+              <div className="mt-0.5">{ROLE_DESC[role]}</div>
+            </div>
+          )}
           {MODULE_META.filter((m) => hasAccess(m.key)).map((m) => {
             const Icon = m.icon;
             const active = activeModule === m.key;
@@ -2523,17 +2542,18 @@ export default function App() {
               <button
                 key={m.key}
                 onClick={() => setActiveModule(m.key)}
-                className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-left transition-colors ${
+                title={sidebarCollapsed ? m.label : undefined}
+                className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-left transition-colors ${sidebarCollapsed ? "justify-center px-2" : ""} ${
                   active ? "bg-fuchsia-50 text-fuchsia-700 font-medium" : "text-slate-600 hover:bg-slate-50"
                 }`}
               >
-                <Icon size={16} />
-                <span className="flex-1">{m.label}</span>
-                {active && <ChevronRight size={14} />}
+                <Icon size={16} className="shrink-0" />
+                {!sidebarCollapsed && <span className="flex-1">{m.label}</span>}
+                {!sidebarCollapsed && active && <ChevronRight size={14} />}
               </button>
             );
           })}
-          {MODULE_META.filter((m) => !hasAccess(m.key)).length > 0 && (
+          {!sidebarCollapsed && MODULE_META.filter((m) => !hasAccess(m.key)).length > 0 && (
             <div className="mt-2 pt-2 border-t border-slate-100">
               <div className="text-[11px] text-slate-300 px-2 mb-1">已隱藏（無權限）</div>
               {MODULE_META.filter((m) => !hasAccess(m.key)).map((m) => (
