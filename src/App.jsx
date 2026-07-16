@@ -1713,7 +1713,7 @@ function QuickRoutineOrderModal({ open, onClose, onSubmit }) {
    十二、權限管理 + Google 試算表匯出設定（點8、點9，僅主管可開啟）
    ============================================================ */
 
-function PermissionsAdminModal({ open, onClose, staffList, onAddStaff, onDeleteStaff, onTogglePermission, onUpdateEmail, onUpdateName, webhookUrl, onWebhookChange, exportLog }) {
+function PermissionsAdminModal({ open, onClose, staffList, onAddStaff, onDeleteStaff, onTogglePermission, onUpdateEmail, onUpdateName, webhookUrl, onWebhookChange }) {
   const [newStaff, setNewStaff] = useState({ name: "", email: "", role: ROLE.SALES });
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const [expandedIds, setExpandedIds] = useState(new Set());
@@ -1880,7 +1880,7 @@ function PermissionsAdminModal({ open, onClose, staffList, onAddStaff, onDeleteS
               <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">Google 試算表匯出</h4>
               <p className="text-xs text-slate-400 mb-2">
                 填入您部署的 Google Apps Script Web App 網址，「完成訂單」時，非常規品項會自動整理成一列資料並嘗試送出。
-                由於瀏覽器安全限制，實際送達仍請以您的 Google 試算表為準；下方「匯出紀錄」會列出本次工作階段中已整理好、準備送出的資料，供核對。
+                由於瀏覽器安全限制，實際送達仍請以您的 Google 試算表為準。
               </p>
               <input
                 placeholder="https://script.google.com/macros/s/xxxx/exec"
@@ -1888,22 +1888,6 @@ function PermissionsAdminModal({ open, onClose, staffList, onAddStaff, onDeleteS
                 onChange={(e) => onWebhookChange(e.target.value)}
                 className="w-full border border-slate-200 rounded px-2 py-1.5 text-sm font-mono"
               />
-              {exportLog.length > 0 && (
-                <div className="mt-3 space-y-1.5 max-h-48 overflow-y-auto">
-                  {exportLog.map((row) => (
-                    <div key={row.id} className="text-xs bg-slate-50 rounded px-2 py-1.5 flex flex-wrap gap-x-3 gap-y-0.5">
-                      <span className="text-slate-400">{row.日期}</span>
-                      <span className="font-mono">{row.訂單編號}</span>
-                      <span>{row.客戶名}</span>
-                      <span className="font-medium">{row.物件名}</span>
-                      <span>×{row.數量}</span>
-                      <span className="text-slate-400">{row.紙張}</span>
-                      <span className="text-slate-400">{row.後加工}</span>
-                      {row.總價 && <span className="font-medium text-orange-600">{row.總價}</span>}
-                    </div>
-                  ))}
-                </div>
-              )}
             </div>
           </div>
         </div>
@@ -2203,6 +2187,7 @@ export default function App() {
         type: "delivery",
         label: `出貨配送：${order.customer} - ${order.product}`,
         orderNo: order.orderNo,
+        orderId: order.id,
         customer: order.customer,
         sequence: formData.sequence,
         managerNote: formData.managerNote,
@@ -2254,7 +2239,8 @@ export default function App() {
   const addOrder = (data) => {
     setOrders((prev) => {
       const nextId = nextOrderId(prev);
-      const orderNo = (data.orderNo || "").trim() || generateOrderNo(prev);
+      const manualNo = (data.orderNo || "").trim();
+      const orderNo = manualNo && !prev.some((o) => o.orderNo === manualNo) ? manualNo : generateOrderNo(prev);
       return [
         ...prev,
         makeOrder(nextId, orderNo, data.customer, data.product, data.qty || "-", S.QUOTE_PENDING, {
@@ -2270,7 +2256,8 @@ export default function App() {
   const addRoutineOrder = (data) => {
     setOrders((prev) => {
       const nextId = nextOrderId(prev);
-      const orderNo = (data.orderNo || "").trim() || generateOrderNo(prev);
+      const manualNo = (data.orderNo || "").trim();
+      const orderNo = manualNo && !prev.some((o) => o.orderNo === manualNo) ? manualNo : generateOrderNo(prev);
       const meta = { 建檔方式: "常規品項快速建檔（免報價）" };
       if (data.itemName) meta.品名 = data.itemName;
       if (data.spec) meta.規格 = data.spec;
@@ -2415,10 +2402,11 @@ export default function App() {
 
   const deleteTask = (taskId) => {
     const task = deliveryTasks.find((t) => t.id === taskId);
-    if (task && task.orderNo) {
+    if (task && (task.orderId || task.orderNo)) {
       setOrders((prev) =>
         prev.map((o) => {
-          if (o.orderNo === task.orderNo && o.status === S.DELIVERY_ROUTE) {
+          const isMatch = task.orderId ? o.id === task.orderId : o.orderNo === task.orderNo;
+          if (isMatch && o.status === S.DELIVERY_ROUTE) {
             return {
               ...o,
               status: S.SHIPPING_OUT,
@@ -2490,8 +2478,8 @@ export default function App() {
   const completeOrderTask = (taskId) => {
     const task = deliveryTasks.find((t) => t.id === taskId);
     const now = formattedDateTime();
-    if (task && task.orderNo) {
-      const order = orders.find((o) => o.orderNo === task.orderNo);
+    if (task && (task.orderId || task.orderNo)) {
+      const order = task.orderId ? orders.find((o) => o.id === task.orderId) : orders.find((o) => o.orderNo === task.orderNo);
       if (order) {
         if (!order.routine) exportOrderToSheet(order);
         updateOrder(order.id, (o) => ({
@@ -2773,7 +2761,6 @@ export default function App() {
         onUpdateName={updateStaffName}
         webhookUrl={sheetWebhookUrl}
         onWebhookChange={setSheetWebhookUrl}
-        exportLog={exportLog}
       />
     </div>
   );
