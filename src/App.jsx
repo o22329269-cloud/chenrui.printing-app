@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import {
   LayoutDashboard, FileText, Layers, PackageSearch, PackageCheck, Route,
   ClipboardList, Lock, X, History, CheckCircle2, ArrowRight,
-  Building2, Search, ChevronRight, ChevronLeft, Plus, Truck, Send, ChevronUp, ChevronDown,
+  Building2, Search, ChevronRight, ChevronLeft, Plus, Forward, ChevronUp, ChevronDown,
   Pencil, Trash2, Undo2, AlertTriangle, Settings, Users, LogIn, LogOut, Loader2, Mail
 } from "lucide-react";
 import { createClient } from "@supabase/supabase-js";
@@ -289,7 +289,7 @@ const ROUTINE_PRODUCTS = ["名片", "貼紙", "DM", "布條", "其他（自行�
 
 const TASK_TYPE_LABELS = {
   delivery: "出貨配送",
-  pickup: "加工取件",
+  pickup: "載回公司",
   transfer: "轉送下一站",
   sample_pickup: "客戶取樣",
   sample_deliver: "客戶送樣",
@@ -720,11 +720,11 @@ function StepCell({ stepNo, step, canAct, canDelete, onLabelChange, onToggleDone
         <span className="text-[10px] text-slate-400">完成</span>
         {canAct && (
           <>
-            <button title="加工站取件" onClick={() => onSchedule("pickup")} className="ml-auto text-slate-300 hover:text-emerald-600">
-              <Truck size={12} />
+            <button title="載回公司" onClick={() => onSchedule("pickup")} className="ml-auto text-slate-300 hover:text-emerald-600">
+              <Building2 size={12} />
             </button>
             <button title="送至下一站" onClick={() => onSchedule("transfer")} className="text-slate-300 hover:text-cyan-600">
-              <Send size={12} />
+              <Forward size={12} />
             </button>
           </>
         )}
@@ -2358,7 +2358,7 @@ export default function App() {
       orderId: order.id,
       itemId: item.id,
       nextStepId: nextStep ? nextStep.id : null,
-      label: type === "pickup" ? `加工取件－${item.name}` : `轉送下一站－${item.name}`,
+      label: type === "pickup" ? `載回公司－${item.name}` : `轉送下一站－${item.name}`,
     });
     updateOrder(orderId, (o) => ({
       ...o,
