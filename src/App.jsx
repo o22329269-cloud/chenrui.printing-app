@@ -2403,10 +2403,13 @@ export default function App() {
   const deleteTask = (taskId) => {
     const task = deliveryTasks.find((t) => t.id === taskId);
     if (task && (task.orderId || task.orderNo)) {
-      setOrders((prev) =>
-        prev.map((o) => {
-          const isMatch = task.orderId ? o.id === task.orderId : o.orderNo === task.orderNo;
-          if (isMatch && o.status === S.DELIVERY_ROUTE) {
+      setOrders((prev) => {
+        const matchById = task.orderId ? prev.find((o) => o.id === task.orderId) : null;
+        const matchByNo = !matchById && task.orderNo ? prev.find((o) => o.orderNo === task.orderNo) : null;
+        const target = matchById || matchByNo;
+        if (!target) return prev;
+        return prev.map((o) => {
+          if (o.id === target.id && o.status === S.DELIVERY_ROUTE) {
             return {
               ...o,
               status: S.SHIPPING_OUT,
@@ -2415,8 +2418,8 @@ export default function App() {
             };
           }
           return o;
-        })
-      );
+        });
+      });
     }
     setDeliveryTasks((prev) => prev.filter((t) => t.id !== taskId));
   };
@@ -2477,21 +2480,27 @@ export default function App() {
   // 點7：路線安排中按下「完成訂單」，訂單才真正離開已開單待出貨
   const completeOrderTask = (taskId) => {
     const task = deliveryTasks.find((t) => t.id === taskId);
+    if (!task) return;
     const now = formattedDateTime();
-    if (task && (task.orderId || task.orderNo)) {
-      const order = task.orderId ? orders.find((o) => o.id === task.orderId) : orders.find((o) => o.orderNo === task.orderNo);
-      if (order) {
-        if (!order.routine) exportOrderToSheet(order);
-        updateOrder(order.id, (o) => ({
-          ...o,
-          status: S.DELIVERY_ROUTE,
-          routeArranged: false,
-          completedAt: now,
-          items: (!o.routine && o.plateType === "independent") ? [] : o.items,
-          history: [...o.history, { from: o.status, to: S.DELIVERY_ROUTE, by: activeStaff.name, at: formattedToday(), note: "完成訂單" }],
-        }));
-      }
+    let order = null;
+    if (task.orderId) order = orders.find((o) => o.id === task.orderId);
+    if (!order && task.orderNo) order = orders.find((o) => o.orderNo === task.orderNo);
+
+    if (!order) {
+      // 點4：找不到對應訂單時明確告知，且不把任務標記完成，避免問題被默默蓋掉、訂單卡在原地卻看不出原因
+      setCloudError(`完成訂單失敗：找不到對應的訂單（訂單編號：${task.orderNo || "未知"}），該訂單可能已被刪除或編號已變更。此任務未標記完成，請確認後再試一次。`);
+      return;
     }
+
+    if (!order.routine) exportOrderToSheet(order);
+    updateOrder(order.id, (o) => ({
+      ...o,
+      status: S.DELIVERY_ROUTE,
+      routeArranged: false,
+      completedAt: now,
+      items: (!o.routine && o.plateType === "independent") ? [] : o.items,
+      history: [...o.history, { from: o.status, to: S.DELIVERY_ROUTE, by: activeStaff.name, at: formattedToday(), note: "完成訂單" }],
+    }));
     setDeliveryTasks((prev) => prev.map((t) => (t.id === taskId ? { ...t, status: "done", completedAt: now } : t)));
   };
 
