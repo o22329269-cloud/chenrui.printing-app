@@ -24,10 +24,79 @@ const APP_STATE_ROW_ID = 1;
 /* ============================================================
    uid / date helpers（demo 用，正式環境請由後端產生）
    ============================================================ */
-let __uidCounter = 0;
+// 重要修正：先前用「每次載入頁面就從 0 開始算」的計數器，一旦資料透過雲端跨裝置／跨次重新整理同步，
+// 不同時間產生的 id（例如兩次都叫 task-3）會撞在一起，導致「找到第一個符合 id 的資料」時抓錯物件
+// （這正是「按下 A 物件完成訂單卻對到 B 訂單」的根本原因）。改用真正全域唯一的亂數 id，徹底避免重複。
 function uid(prefix) {
-  __uidCounter += 1;
-  return `${prefix}-${__uidCounter}`;
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return `${prefix}-${crypto.randomUUID()}`;
+  }
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+// 修復既有雲端資料裡，因舊版 uid() 每次重新整理就從頭計數而造成的重複 id
+// （這是「按下 A 物件完成訂單卻對到 B 訂單」的根本原因：重複 id 讓 .find() 抓到錯誤的舊資料）
+function dedupeIds(list) {
+  if (!Array.isArray(list)) return { list, changed: false };
+  const seen = new Set();
+  let changed = false;
+  const result = list.map((item) => {
+    if (item && item.id != null) {
+      if (seen.has(item.id)) {
+        changed = true;
+        return { ...item, id: uid("fix") };
+      }
+      seen.add(item.id);
+    }
+    return item;
+  });
+  return { list: result, changed };
+}
+function dedupeAppState(d) {
+  let changed = false;
+  const next = { ...d };
+
+  if (Array.isArray(d.deliveryTasks)) {
+    const r = dedupeIds(d.deliveryTasks);
+    next.deliveryTasks = r.list;
+    changed = changed || r.changed;
+  }
+  if (Array.isArray(d.staffList)) {
+    const r = dedupeIds(d.staffList);
+    next.staffList = r.list;
+    changed = changed || r.changed;
+  }
+  if (Array.isArray(d.orders)) {
+    next.orders = d.orders.map((o) => {
+      if (!Array.isArray(o.items) || o.items.length === 0) return o;
+      const itemsSeen = new Set();
+      let itemsChanged = false;
+      const newItems = o.items.map((it) => {
+        let item = it;
+        if (itemsSeen.has(item.id)) {
+          itemsChanged = true;
+          item = { ...item, id: uid("fixitem") };
+        }
+        itemsSeen.add(item.id);
+        if (Array.isArray(item.steps)) {
+          const stepsSeen = new Set();
+          let stepsChanged = false;
+          const newSteps = item.steps.map((s) => {
+            if (stepsSeen.has(s.id)) {
+              stepsChanged = true;
+              return { ...s, id: uid("fixstep") };
+            }
+            stepsSeen.add(s.id);
+            return s;
+          });
+          if (stepsChanged) { item = { ...item, steps: newSteps }; itemsChanged = true; }
+        }
+        return item;
+      });
+      if (itemsChanged) { changed = true; return { ...o, items: newItems }; }
+      return o;
+    });
+  }
+  return { data: next, changed };
 }
 function formattedToday() {
   const d = new Date();
@@ -2046,7 +2115,12 @@ export default function App() {
         return;
       }
       if (data?.data) {
-        applyRemote(data.data);
+        const { data: fixedData, changed } = dedupeAppState(data.data);
+        applyRemote(fixedData);
+        if (changed) {
+          // 找到重複 id，立即把修好的版本寫回雲端，一次性永久修正，不是只在這次畫面上看起來正常
+          await supabase.from("app_state").upsert({ id: APP_STATE_ROW_ID, data: fixedData }, { onConflict: "id" });
+        }
       } else {
         // 第一次使用，把目前的示範資料寫進雲端當作初始狀態
         const { error: seedError } = await supabase.from("app_state").upsert(
